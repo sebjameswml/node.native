@@ -2,6 +2,13 @@
 #define __HTTP_H__
 
 #include <sstream>
+
+// Require GLIBCXX_3.4.19 to use chrono on Linux.
+#ifdef HAVE_CHRONO
+#include <chrono>
+#include <ctime>
+#endif
+
 #include <http_parser.h>
 #include "base.h"
 #include "handle.h"
@@ -157,6 +164,10 @@ namespace native
                 std::stringstream response_text;
                 response_text << "HTTP/1.1 ";
                 response_text << status_ << " " << get_status_text(status_) << "\r\n";
+#ifdef HAVE_CHRONO
+                std::time_t datenow = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
+                response_text << "Date: " << std::ctime(&datenow) << "\r\n";
+#endif
                 for(auto h : headers_)
                 {
                     response_text << h.first << ": " << h.second << "\r\n";
