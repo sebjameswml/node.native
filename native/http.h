@@ -66,6 +66,12 @@ namespace native
                 //printf("~url_obj() %x\n", this);
             }
 
+            void reset (void)
+            {
+                // NB: Am leaving handle_ unmodified and only clearing buf_
+                buf_ = "";
+            }
+
         public:
             std::string schema() const
             {
@@ -157,9 +163,114 @@ namespace native
             ~response()
             {}
 
+            // Reset the response to be used with the existing connection, but for a new response to a client
+            void reset_for_existing_connection (void)
+            {
+                headers_.clear();
+                status_ = 200;
+                send_continue_first_ = false;
+                // Leave keep_alive unchanged
+            }
+
+        private:
+            // If the client sent a 100-Continue, then we need to return a 100-Continue, and then
+            // straight away a 200-Response or whatever. (First coded to replicate the kind of behaviour
+            // which is required of an IPP server).
+            bool continue_then_end(const std::string& body)
+            {
+                // For use after the 100-Continue was sent.
+                int status_save = status_;
+
+                this->set_status(100);
+                // No Content-Length
+                std::stringstream continue_response_text;
+                continue_response_text << "HTTP/1.1 ";
+                continue_response_text << status_ << " " << get_status_text(status_) << "\r\n";
+                // No headers.
+                continue_response_text << "\r\n";
+                // No body.
+
+                auto str = continue_response_text.str();
+                return socket_->write(str.c_str(), static_cast<int>(str.length()), [=](error e) {
+                    if(e)
+                    {
+                        // TODO: handle error while writing the 100-Continue.
+                    }
+                    else
+                    {
+                        // The 100-Continue was written to the TCP socket. Now we write the end() message.
+
+                        // restore the saved status:
+                        this->set_status(status_save);
+
+                        // Content-Length
+                        if(headers_.find("Content-Length") == headers_.end())
+                        {
+                            std::stringstream ss;
+                            ss << body.length();
+                            headers_["Content-Length"] = ss.str();
+                        }
+
+                        std::stringstream response_text;
+                        response_text << "HTTP/1.1 ";
+                        response_text << status_ << " " << get_status_text(status_) << "\r\n";
+#ifdef HAVE_CHRONO
+                        std::time_t datenow = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
+                        response_text << "Date: " << std::ctime(&datenow) << "\r\n";
+#endif
+                        this->add_connection_headers(response_text);
+
+                        for(auto h : headers_)
+                        {
+                            response_text << h.first << ": " << h.second << "\r\n";
+                        }
+                        response_text << "\r\n";
+                        response_text << body;
+
+                        auto str = response_text.str();
+                        return socket_->write(str.c_str(), static_cast<int>(str.length()), [=](error e) {
+                                if(e)
+                                {
+                                    // TODO: handle error
+                                }
+                                if (keep_alive_timeout_ == 0)
+                                {
+                                    // clean up - this causes client_ to deconstruct itself
+                                    // (it's std::shared_ptr::reset) and hence close the connection.
+                                    client_.reset();
+                                }
+                                else
+                                {
+                                    client_->re_parse();
+                                }
+                            });
+                    }
+                });
+            }
+
+            void add_connection_headers(std::stringstream& text)
+            {
+                if (keep_alive_timeout_ > 0)
+                {
+                    text << "Connection: Keep-Alive\r\n";
+                    text << "Keep-Alive: timeout=" << keep_alive_timeout_ << "\r\n";
+                    socket_->keepalive (true, keep_alive_timeout_);
+                }
+                else
+                {
+                    text << "Connection: Close\r\n";
+                    socket_->keepalive (false, keep_alive_timeout_);
+                }
+            }
+
         public:
+
             bool end(const std::string& body)
             {
+                if (send_continue_first_) {
+                    return this->continue_then_end(body);
+                }
+
                 // Content-Length
                 if(headers_.find("Content-Length") == headers_.end())
                 {
@@ -175,6 +286,8 @@ namespace native
                 std::time_t datenow = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
                 response_text << "Date: " << std::ctime(&datenow) << "\r\n";
 #endif
+                this->add_connection_headers(response_text);
+
                 for(auto h : headers_)
                 {
                     response_text << h.first << ": " << h.second << "\r\n";
@@ -188,8 +301,14 @@ namespace native
                     {
                         // TODO: handle error
                     }
-                    // clean up
-                    client_.reset();
+                    if (keep_alive_timeout_ == 0)
+                    {
+                        client_.reset();
+                    }
+                    else
+                    {
+                        client_->re_parse();
+                    }
                 });
             }
 
@@ -201,6 +320,16 @@ namespace native
             void set_header(const std::string& key, const std::string& value)
             {
                 headers_[key] = value;
+            }
+
+            void set_send_continue_first(const bool send_continue_first)
+            {
+                send_continue_first_ = send_continue_first;
+            }
+
+            void set_keep_alive_timeout(const unsigned int keep_alive_timeout)
+            {
+                keep_alive_timeout_ = keep_alive_timeout;
             }
 
             static std::string get_status_text(int status)
@@ -273,6 +402,12 @@ namespace native
             native::net::tcp* socket_; // I think this should be a shared pointer, too
             std::map<std::string, std::string, native::text::ci_less> headers_;
             int status_;
+
+            // Whether to send a 100-Continue prior to the end() response:
+            bool send_continue_first_ = false;
+
+            // If >0, send Connection: Keep-Alive and set Keep-Alive: timeout= this value (seconds).
+            unsigned int keep_alive_timeout_ = 0;
         };
 
         class request
@@ -290,6 +425,13 @@ namespace native
             ~request()
             {
                 //printf("~request() %x\n", this);
+            }
+
+            void reset(void)
+            {
+                url_.reset();
+                headers_.clear();
+                body_ = "";
             }
 
         public:
@@ -461,9 +603,34 @@ namespace native
                 };
 
                 socket_->read_start([=](const char* buf, int len){
-                    if (buf == 0x00 && len == -1) {
+                    if (buf == 0x00 && len == -1)
+                    {
                         response_->set_status(500);
-                    } else {
+                    }
+                    else
+                    {
+                        http_parser_execute(&parser_, &parser_settings_, buf, len);
+                    }
+                });
+
+                return true;
+            }
+
+            // Called to parse additional requests from a client sent on a keep-alive connection.
+            bool re_parse(void)
+            {
+                // reset request and response objects.
+                request_->reset();
+                response_->reset_for_existing_connection();
+
+                // Re-initialise the read_start callback.
+                socket_->read_start([=](const char* buf, int len){
+                    if (buf == 0x00 && len == -1)
+                    {
+                        response_->set_status(500);
+                    }
+                    else
+                    {
                         http_parser_execute(&parser_, &parser_settings_, buf, len);
                     }
                 });
@@ -477,11 +644,11 @@ namespace native
             bool was_header_value_;
             std::string last_header_field_;
             std::string last_header_value_;
-
+            bool keep_alive = false;
+            int keep_alive_timeout = 30;
             std::shared_ptr<native::net::tcp> socket_;
             request* request_;
             response* response_;
-
             callbacks* callback_lut_;
         };
 
