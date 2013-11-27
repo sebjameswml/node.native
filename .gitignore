@@ -8,6 +8,7 @@ wiki/*
 
 webclient
 webserver
+keepaliveserver
 file_test
 
 webserver.dSYM
