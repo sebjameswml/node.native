@@ -128,11 +128,11 @@ namespace native
 
         class response
         {
-            friend class client_context;
+            friend class client_context; // so client_context, which has a response object can call members here.
 
         private:
             response(client_context* client, native::net::tcp* socket)
-                : client_(client)
+                : client_(client) // This is the response's "parent" client.
                 , socket_(socket)
                 , headers_()
                 , status_(200)
@@ -252,14 +252,14 @@ namespace native
 
         private:
             http_client_ptr client_;
-            native::net::tcp* socket_;
+            native::net::tcp* socket_; // I think this should be a shared pointer, too
             std::map<std::string, std::string, native::text::ci_less> headers_;
             int status_;
         };
 
         class request
         {
-            friend class client_context;
+            friend class client_context; // So client_context, which has a request object, can call functions.
 
         private:
             request()
@@ -359,6 +359,7 @@ namespace native
             }
 
         private:
+            // client_context::parse is called from a callback configured in http::listen
             bool parse(std::function<void(request&, response&)> callback)
             {
                 request_ = new request;
@@ -425,20 +426,20 @@ namespace native
                         client->request_->headers_[client->last_header_field_] = client->last_header_value_;
                     }
 
-                    return 0; // 1 to prevent reading of message body.
+                    return 0; // 1 to prevent reading of message body - see http_parser.h circa line 61.
                 };
                 parser_settings_.on_body = [](http_parser* parser, const char* at, size_t len) {
-                    //printf("on_body, len of 'char* at' is %d\n", len);
                     auto client = reinterpret_cast<client_context*>(parser->data);
                     client->request_->body_ = std::string(at, len);
                     return 0;
                 };
                 parser_settings_.on_message_complete = [](http_parser* parser) {
-                    //printf("on_message_complete, so invoke the callback.\n");
                     auto client = reinterpret_cast<client_context*>(parser->data);
-                    // invoke stored callback object
+
+                    // invoke stored callback object - this is the one registered by the "user" code (e.g. in webserver.cpp)
                     callbacks::invoke<decltype(callback)>(client->callback_lut_, 0, *client->request_, *client->response_);
-                    return 1; // 0 or 1?
+
+                    return 0; // 1 means error.
                 };
 
                 socket_->read_start([=](const char* buf, int len){
@@ -494,6 +495,7 @@ namespace native
             {
                 if(!socket_->bind(ip, port)) return false;
 
+                // Set a callback for the 'listening' event on the socket.
                 if(!socket_->listen([=](error e) {
                     if(e)
                     {
