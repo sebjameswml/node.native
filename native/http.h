@@ -130,15 +130,22 @@ namespace native
             std::string buf_;
         };
 
-        class client_context;
-        typedef std::shared_ptr<client_context> http_client_ptr;
+        // Interface class so that we can call member methods (re_parse) in the response class.
+        class client_context_iface
+        {
+        public:
+            virtual ~client_context_iface() {}
+            virtual bool re_parse (void) = 0;
+        };
+
+        typedef std::shared_ptr<client_context_iface> http_client_ptr;
 
         class response
         {
             friend class client_context; // so client_context, which has a response object can call members here.
 
         private:
-            response(client_context* client, native::net::tcp* socket)
+            response(client_context_iface* client, native::net::tcp* socket)
                 : client_(client) // This is the response's "parent" client.
                 , socket_(socket)
                 , headers_()
@@ -318,7 +325,7 @@ namespace native
             std::string default_value_;
         };
 
-        class client_context
+        class client_context : public client_context_iface
         {
             friend class http;
 
