@@ -17,6 +17,7 @@
  */
 
 #include <iostream>
+#include <sstream>
 #include <native/native.h>
 
 using namespace native::http;
@@ -24,27 +25,29 @@ using namespace std;
 
 int main() {
     http server;
-    int port = 8080;
+    int port = 8081;
 
-    std::map<native::http::response*, int> stage; // For response id first, set the stage to second.
+    // key: response id (pointer address), value "stage counter"
+    std::map<native::http::response*, int> msg_number;
 
-    if(!server.listen("0.0.0.0", port, [=,&stage](request& req, response& res) {
+    if(!server.listen("0.0.0.0", port, [=,&msg_number](request& req, response& res) {
 
-        printf ("webserver - user-registered callback START.\n");
+        printf("webserver - user-registered callback START.\n");
 
         // Using the memory address of response to identify
         // the connection - for each response in a kept-alive
         // connection, the response object is re-used, hence
         // its memory address will not change.
         try {
-            stage[&res]++;
+            msg_number[&res]++;
         } catch (std::out_of_range& e) {
-            //stage.emplace(std::make_pair(&res, static_cast<int>(0)));
-            stage[&res] = 0;
+            stringstream ss;
+            ss << "Failed to record a message number count for the response with id 0x"
+               << hex << &res << endl;
+            throw runtime_error (ss.str());
         }
-        printf ("webserver -- stage: %d for response ID 0x%x\n", stage.at(&res), &res);
 
-        string body = req.get_body(); // Now you can write a custom handler for the body content.
+        printf("webserver -- msg_number: %d for response ID 0x%x\n", msg_number.at(&res), &res);
 
         res.set_header("Content-Type", "text/html");
         res.set_status(200);
@@ -53,17 +56,25 @@ int main() {
             res.set_send_continue_first(true);
         }
 
-        if (stage[&res] > 1) {
-            res.set_keep_alive_timeout (0);
-            stage[&res] = 0;
+        if (msg_number[&res] <= 1) {
+            // On the first message of the client connection, enable keep-alive
+            res.set_keep_alive_timeout(3);
         } else {
-            res.set_keep_alive_timeout (30); // or 30 for keep alive == true.
+            // On second message, disable keep-alive and reset the msg_number counter.
+            res.set_keep_alive_timeout(0);
+            msg_number[&res] = 0;
         }
 
-        // We're echoing back the body of the request:
+        // We'll echo the body back in the response.
+        string body = req.get_body();
+        if (body.empty()) {
+            body = "no body to echo back\r\n";
+        }
+        printf("Setting body to '%s'", body.c_str());
         res.end(body);
 
-        printf ("webserver - user-registered callback END\n");
+        printf("webserver - user-registered callback END\n");
+
     })) {
         return 1; // Failed to run server.
     }
