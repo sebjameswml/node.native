@@ -7,6 +7,7 @@ doc/latex/*
 wiki/*
 
 webclient
+keepaliveclient
 webserver
 keepaliveserver
 file_test
@@ -15,3 +16,6 @@ webserver.dSYM
 webclient.dSYM
 file_test.dSYM
 *.xcodeproj
+
+*~
+native/*~

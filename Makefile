@@ -12,10 +12,13 @@ else
 	CXXFLAGS = -std=gnu++0x -g -O0 -I$(LIBUV_PATH)/include -I$(HTTP_PARSER_PATH) -I. -D_LARGEFILE_SOURCE -D_FILE_OFFSET_BITS=64
 endif
 
-all: webclient webserver keepaliveserver file_test
+all: webclient keepaliveclient webserver keepaliveserver file_test
 
 webclient: webclient.cpp $(LIBUV_PATH)/$(LIBUV_NAME) $(HTTP_PARSER_PATH)/http_parser.o $(wildcard native/*.h)
 	$(CXX) $(CXXFLAGS) -o webclient webclient.cpp $(LIBUV_PATH)/$(LIBUV_NAME) $(HTTP_PARSER_PATH)/http_parser.o $(RTLIB) -lm -lpthread
+
+keepaliveclient: keepaliveclient.cpp $(LIBUV_PATH)/$(LIBUV_NAME) $(HTTP_PARSER_PATH)/http_parser.o $(wildcard native/*.h)
+	$(CXX) $(CXXFLAGS) -o keepaliveclient keepaliveclient.cpp $(LIBUV_PATH)/$(LIBUV_NAME) $(HTTP_PARSER_PATH)/http_parser.o $(RTLIB) -lm -lpthread
 
 webserver: webserver.cpp $(LIBUV_PATH)/$(LIBUV_NAME) $(HTTP_PARSER_PATH)/http_parser.o $(wildcard native/*.h)
 	$(CXX) $(CXXFLAGS) -o webserver webserver.cpp $(LIBUV_PATH)/$(LIBUV_NAME) $(HTTP_PARSER_PATH)/http_parser.o $(RTLIB) -lm -lpthread
@@ -37,6 +40,6 @@ clean:
 	$(MAKE) -C http-parser clean
 	rm -f $(LIBUV_PATH)/$(LIBUV_NAME)
 	rm -f $(HTTP_PARSER_PATH)/http_parser.o
-	rm -f webclient webserver keepaliveserver file_test
+	rm -f webclient keepaliveclient webserver keepaliveserver file_test
 
 
