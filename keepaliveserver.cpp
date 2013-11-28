@@ -32,7 +32,7 @@ int main() {
 
     if(!server.listen("0.0.0.0", port, [=,&msg_number](request& req, response& res) {
 
-        printf("webserver - user-registered callback START.\n");
+        cout << "User-registered callback START." << endl;
 
         // Using the memory address of response to identify
         // the connection - for each response in a kept-alive
@@ -47,7 +47,8 @@ int main() {
             throw runtime_error (ss.str());
         }
 
-        printf("webserver -- msg_number: %d for response ID 0x%x\n", msg_number.at(&res), &res);
+        cout << " msg_number: " << msg_number.at(&res)
+             << " for response ID 0x" << hex << &res << endl;
 
         res.set_header("Content-Type", "text/html");
         res.set_status(200);
@@ -68,12 +69,12 @@ int main() {
         // We'll echo the body back in the response.
         string body = req.get_body();
         if (body.empty()) {
-            body = "no body to echo back\r\n";
+            body = "no body to echo back";
         }
-        printf("Setting body to '%s'", body.c_str());
+        cout << " Setting body to '" << body << "'" << endl;
         res.end(body);
 
-        printf("webserver - user-registered callback END\n");
+        cout << "User-registered callback END" << endl;
 
     })) {
         return 1; // Failed to run server.
